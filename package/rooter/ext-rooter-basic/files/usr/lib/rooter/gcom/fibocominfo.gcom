@@ -17,14 +17,7 @@ send "AT+GTCCINFO?^m"
 let t=time()+f
 gosub getresult
 if $s="^mTIMEOUT ERROR" print $s
-if $s="^jERROR" goto gtrat
 
-send "AT+COPN^m"
-let t=time()+f
-gosub getresult
-if $s="^mTIMEOUT ERROR" print $s
-
-:gtrat
 send "AT+GTRAT?^m"
 let t=time()+f
 gosub getresult
@@ -41,6 +34,16 @@ gosub getresult
 if $s="^mTIMEOUT ERROR" print $s
 
 send "AT+XMCI=1;+XLEC?^m"
+let t=time()+f
+gosub getresult
+if $s="^mTIMEOUT ERROR" print $s
+
+send "AT+RSRP?^m"
+let t=time()+f
+gosub getresult
+if $s="^mTIMEOUT ERROR" print $s
+
+send "AT+RSRQ?^m"
 let t=time()+f
 gosub getresult
 if $s="^mTIMEOUT ERROR" print $s

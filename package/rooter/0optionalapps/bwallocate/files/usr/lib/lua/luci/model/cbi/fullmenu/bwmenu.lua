@@ -3,7 +3,7 @@ local utl = require "luci.util"
 m = Map("custom", translate("Bandwidth Allocation"), translate("Set Maximum Bandwidth Usage before Internet blockage"))
 
 m.on_after_save = function(self)
-	luci.sys.call("/usr/lib/bwmon/allocate.sh 0 &")
+	--luci.sys.call("/usr/lib/bwmon/allocate.sh 0 &")
 end
 
 s = m:section(TypedSection, "bwallocate", translate("Allocation Settings"))
@@ -70,6 +70,10 @@ up.datatype = "and(uinteger,min(1),max(999))"
 up:depends("action", "1")
 up.default = "2"
 
+
+m:section(SimpleSection).template = "fullmenu/bwreset"
+
+
 s = m:section(TypedSection, "texting", translate("Text/Email Settings"))
 s.anonymous = true
 s.addremove = false
@@ -99,6 +103,7 @@ ct:depends("text", "1")
 
 sdhour = s:option(ListValue, "time", translate("Sending Time :"), translate("Time to send information"))
 sdhour.rmempty = true
+sdhour:value("-1", "No Delay")
 sdhour:value("0", "12:00 AM")
 sdhour:value("1", "12:15 AM")
 sdhour:value("2", "12:30 AM")
@@ -210,6 +215,7 @@ xct:depends("method", "0")
 
 xxct = s:option(ListValue, "increment", translate("Increment : "), translate("Amount Used between sending information"))
 xxct.rmempty = true
+xxct:value("1", translate("Every 1 GB"))
 xxct:value("50", translate("Every 50 GB"))
 xxct:value("75", translate("Every 75 GB"))
 xxct:value("100", translate("Every 100 GB"))

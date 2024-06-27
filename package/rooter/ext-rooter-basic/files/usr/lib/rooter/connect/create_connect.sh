@@ -1,4 +1,4 @@
-#!/bin/sh
+ #!/bin/sh
 
 ROOTER=/usr/lib/rooter
 ROOTER_LINK="/tmp/links"
@@ -155,6 +155,7 @@ check_apn() {
 	ATCMDD="AT+CGDCONT?;+CFUN?"
 	OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
 	CGDCONT2=$(echo $OX | grep "+CGDCONT: 2,")
+	CGDCONT0=$(echo $OX | grep "+CGDCONT: 0,")
 	if [ -z "$CGDCONT2" ]; then
 		ATCMDD="AT+CGDCONT=2,\"$IPVAR\",\"ims\""
 		OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
@@ -267,7 +268,9 @@ chktelitmbim() {
 
 chkT77() {
 	T77=0
-	if [ $idV = 413c -a $idP = 81d7 ]; then
+	if [ $idV = 1e2d ]; then
+		T77=1
+	elif [ $idV = 413c -a $idP = 81d7 ]; then
 		T77=1
 	elif [ $idV = 413c -a $idP = 81d8 ]; then
 		T77=1
@@ -285,7 +288,9 @@ chkT77() {
 
 chkraw() {
 	RAW=0
-	if [ $idV = 03f0 -a $idP = 0857 ]; then
+	if [ $idV = 1e2d ]; then
+		RAW=1
+	elif [ $idV = 03f0 -a $idP = 0857 ]; then
 		RAW=1
 	elif [ $idV = 1bc7 -a $idP = 1900 ]; then
 		RAW=1
@@ -412,7 +417,7 @@ mbimcport() {
 CURRMODEM=$1
 RECON=$2
 SIERRAID=0
-
+log "Start Connection"
 MAN=$(uci -q get modem.modem$CURRMODEM.manuf)
 MOD=$(uci -q get modem.modem$CURRMODEM.model)
 PROT=$(uci -q get modem.modem$CURRMODEM.proto)
@@ -604,44 +609,54 @@ uci commit modem.modem$CURRMODEM
 					get_tty 02
 					mbimcport
 				else
-					case $idV in
-						"2c7c"|"05c6" )
-							get_tty_fix 2
-							mbimcport
-						;;
-						"03f0" )
-							get_tty 02
-							mbimcport
-						;;
-						"1bc7" )
-							if [ "$idP" = "1041" ]; then
-								get_tty 07
-							else
+					if [ "$idV" = 413c -a "$idP" = 81d9 ]; then
+						get_tty_fix 2
+						lua $ROOTER/common/modemchk.lua "$idV" "$idP" "$CPORT" "$CPORT"
+						source /tmp/parmpass
+						ACMPORT=$CPORT
+						CPORT="8$ACMPORT"
+						ln -fs /dev/ttyACM$ACMPORT /dev/ttyUSB$CPORT
+						log "Modem $CURRMODEM Fibocom MBIM Comm Port : /dev/ttyUSB$CPORT"
+					else
+						case $idV in
+							"2c7c"|"05c6" )
+								get_tty_fix 2
+								mbimcport
+							;;
+							"03f0" )
 								get_tty 02
-							fi
-							mbimcport
-						;;
-						"1e0e" )
-							get_tty 02
-							mbimcport
-						;; 
-						"2cb7" )
-							get_tty_fix 0
-							lua $ROOTER/common/modemchk.lua "$idV" "$idP" "$CPORT" "$CPORT"
-							source /tmp/parmpass
-							ACMPORT=$CPORT
-							CPORT="8$ACMPORT"
-							ln -fs /dev/ttyACM$ACMPORT /dev/ttyUSB$CPORT
+								mbimcport
+							;;
+							"1bc7" )
+								if [ "$idP" = "1041" ]; then
+									get_tty 07
+								else
+									get_tty 02
+								fi
+								mbimcport
+							;;
+							"1e0e" )
+								get_tty 02
+								mbimcport
+							;;
+							"2cb7" )
+								get_tty_fix 0
+								lua $ROOTER/common/modemchk.lua "$idV" "$idP" "$CPORT" "$CPORT"
+								source /tmp/parmpass
+								ACMPORT=$CPORT
+								CPORT="8$ACMPORT"
+								ln -fs /dev/ttyACM$ACMPORT /dev/ttyUSB$CPORT
 
-							uci set modem.modem$CURRMODEM.commport=$CPORT
-							uci set modem.modem$CURRMODEM.proto="30"
-							log "Modem $CURRMODEM MBIM Comm Port : /dev/ttyUSB$CPORT"
-						;;
-						* )
-							uci set modem.modem$CURRMODEM.commport=""
-							log "No MBIM Comm Port"
-						;;
-					esac
+								uci set modem.modem$CURRMODEM.commport=$CPORT
+								uci set modem.modem$CURRMODEM.proto="30"
+								log "Modem $CURRMODEM MBIM Comm Port : /dev/ttyUSB$CPORT"
+							;;
+							* )
+								uci set modem.modem$CURRMODEM.commport=""
+								log "No MBIM Comm Port"
+							;;
+						esac
+					fi
 				fi
 			fi
 		fi
@@ -700,6 +715,17 @@ elif [ "$idV" = "05c6" ]; then
 	fi
 fi
 
+if [ -e /etc/config/wizard ]; then
+	wiz=$(uci -q get wizard.basic.wizard)
+	if [ "$wiz" = "1" ]; then
+		uci set wizard.basic.detect="2"
+		uci commit wizard
+		exit 0
+	fi
+	uci set wizard.basic.detect="1"
+	uci commit wizard
+fi
+
 if [ -e $ROOTER/connect/preconnect.sh ]; then
 	if [ "$RECON" != "2" ]; then
 		$ROOTER/connect/preconnect.sh $CURRMODEM
@@ -729,6 +755,9 @@ if $QUECTEL; then
 		log "Quectel Unsolicited Responses Disabled"
 	fi
 	$ROOTER/connect/bandmask $CURRMODEM 1
+	if [ -e /usr/lib/rooter/connect/mhi2usb.sh ]; then
+		/usr/lib/rooter/connect/mhi2usb.sh $CURRMODEM
+	fi
 	clck=$(uci -q get custom.bandlock.cenable$CURRMODEM)
 	if [ $clck = "1" ]; then
 		ear=$(uci -q get custom.bandlock.earfcn$CURRMODEM)
@@ -781,6 +810,10 @@ if [ $idV = "2cb7" -o $idV = "8087" ]; then
 	$ROOTER/connect/bandmask $CURRMODEM 2
 fi
 
+if [ $idV = "413c" -a $idV = "81d9" ]; then
+	$ROOTER/connect/bandmask $CURRMODEM 2
+fi
+
 chkT77
 if [ $T77 -eq 1 ]; then
 	$ROOTER/connect/bandmask $CURRMODEM 3
@@ -805,15 +838,19 @@ if [ -n "$CHKPORT" ]; then
 		if [ -e $ROOTER/simerr.sh ]; then
 			$ROOTER/simerr.sh $CURRMODEM
 		fi
+		if [ -e /etc/config/wizard]; then
+			uci set wizard.basic.detect="2"
+			uci commit wizard
+		fi
 		exit 0
 	fi
-	
+
 	detect=$(uci -q get modem.modeminfo$CURRMODEM.detect)
 	if [ "$detect" = "1" ]; then
 		log "Stopped after detection"
 		exit 0
 	fi
-	
+
 	if [ -e /usr/lib/gps/gps.sh ]; then
 		/usr/lib/gps/gps.sh $CURRMODEM &
 	fi
@@ -907,34 +944,48 @@ if [ -n "$CHKPORT" ]; then
 			apndata=$(cat /tmp/apndata)" "
 		fi
 	fi
-	
+
 	apd=0
 	if [ -e /usr/lib/autoapn/apn.data ]; then
 		apd=1
 	fi
+	pdptype="IPV4V6"
+	IPVAR=$(uci -q get modem.modeminfo$CURRMODEM.pdptype)
+	case "$IPVAR" in
+		"IP" )
+			pdptype="IPV4"
+		;;
+		"IPV6" )
+			pdptype="IPV6"
+		;;
+		"IPV4V6" )
+			pdptype="IPV4V6"
+		;;
+	esac
 	if [ "$autoapn" = "1" -a $apd -eq 1 ]; then
 		isplist=$(grep -F "$mcc6" '/usr/lib/autoapn/apn.data')
 		if [ -z "$isplist" ]; then
 			isplist=$(grep -F "$mcc5" '/usr/lib/autoapn/apn.data')
 			if [ -z "$isplist" ]; then
-				isplist="000000,$NAPN,Default,$NPASS,$CID,$NUSER,$NAUTH"
+				isplist="000000,$NAPN,Default,$NPASS,$CID,$NUSER,$NAUTH,$pdptype"
 				if [ ! -z "$NAPN2" ]; then
-					isplist=$isplist" 000000,$NAPN2,Default,$NPASS,$CID,$NUSER,$NAUTH"
+					isplist=$isplist" 000000,$NAPN2,Default,$NPASS,$CID,$NUSER,$NAUTH,$pdptype"
 				fi
 				if [ ! -z "$NAPN3" ]; then
-					isplist=$isplist" 000000,$NAPN3,Default,$NPASS,$CID,$NUSER,$NAUTH"
+					isplist=$isplist" 000000,$NAPN3,Default,$NPASS,$CID,$NUSER,$NAUTH,$pdptype"
 				fi
 			fi
 		fi
 	else
 		if [ -z "$apndata" ]; then
-			isplist=$apndata"000000,$NAPN,Default,$NPASS,$CID,$NUSER,$NAUTH"
+			isplist=$apndata"000000,$NAPN,Default,$NPASS,$CID,$NUSER,$NAUTH,$pdptype"
 			if [ ! -z "$NAPN2" ]; then
-				isplist=$isplist" 000000,$NAPN2,Default,$NPASS,$CID,$NUSER,$NAUTH"
+				isplist=$isplist"  000000,$NAPN2,Default,$NPASS,$CID,$NUSER,$NAUTH,$pdptype"
 			fi
 			if [ ! -z "$NAPN3" ]; then
-				isplist=$isplist" 000000,$NAPN3,Default,$NPASS,$CID,$NUSER,$NAUTH"
+				isplist=$isplist"  000000,$NAPN3,Default,$NPASS,$CID,$NUSER,$NAUTH,$pdptype"
 			fi
+			log "$isplist"
 		else
 			isplist=$apndata
 		fi
@@ -986,8 +1037,9 @@ if [ ! -z $modis ]; then
 	fi
 fi
 
-for isp in $isplist 
+for isp in $isplist
 do
+	log "$isp"
 	NAPN=$(echo $isp | cut -d, -f2)
 	NPASS=$(echo $isp | cut -d, -f4)
 	CID=$(echo $isp | cut -d, -f5)
@@ -1007,7 +1059,7 @@ do
 	export SETPASS=$NPASS
 	export SETAUTH=$NAUTH
 	export PINCODE=$PINC
-	
+
 	uci set modem.modem$CURRMODEM.apn=$NAPN
 	uci set modem.modem$CURRMODEM.user=$NUSER
 	uci set modem.modem$CURRMODEM.passw=$NPASS
@@ -1016,7 +1068,7 @@ do
 	uci commit modem
 
 	concount=1
-	while [ "$concount" -lt 3 ]; do
+	while [ "$concount" -lt 2 ]; do
 		case $PROT in
 		"1" )
 			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$CPORT" "auto.gcom" "$CURRMODEM")
@@ -1074,9 +1126,9 @@ do
 		if [ -e $ROOTER/modem-led.sh ]; then
 			$ROOTER/modem-led.sh $CURRMODEM 2
 		fi
-		
+
 		if [ -e $ROOTER/connect/chkconn.sh ]; then
-			jkillall chkconn.sh
+			#jkillall "chkconn1.sh  $CURRMODEM"
 			$ROOTER/connect/chkconn.sh $CURRMODEM &
 		fi
 
@@ -1209,19 +1261,26 @@ do
 			COMMPORT="/dev/ttyUSB"$CPORT
 			ATCMDD="AT+CGACT=0,$CID"
 			OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+			PDPT="IP"
 			check_apn
+			if [ -n "$CGDCONT0" -a $CID != 0 ]; then
+				OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "AT+CGATT=0")
+				OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "AT+CGDCONT=0,\"IP\"")
+				OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "AT+CGDCONT=0")
+				log "PDP Context 0 removed"
+			fi
 			ATCMDD="AT+CGPIAF=1,0,0,0;+XDNS=$CID,1;+XDNS=$CID,2"
 			OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
 			ATCMDD="AT+CGACT=1,$CID"
 			OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
 			ERROR="ERROR"
-			if [ -e /tmp/simerr$CURRMODEM ]; then
-				SIMFAIL=1
-				log "SIM card error"
-			else
+			#if [ -e /tmp/simerr$CURRMODEM ]; then
+			#	SIMFAIL=1
+			#	log "SIM card error"
+			#else
 				chkreg
 				[ "$REGOK" != 1 ] && log "Subscriber registration failed"
-			fi
+			#fi
 			if [ "$SIMFAIL" = 1 -o "$REGOK" != 1 ]; then
 				BRK=1
 				$ROOTER/signal/status.sh $CURRMODEM "$MAN $MOD" "Failed to Connect : Retrying"
@@ -1339,8 +1398,7 @@ do
 		esac
 
 		if [ $BRK = 1 ]; then
-			ATCMDD="AT+COPS=0"
-			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$CPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+			$ROOTER/common/lockchk.sh $CURRMODEM 
 			$ROOTER/log/logger "Retry Connection with Modem #$CURRMODEM"
 			log "Retry Connection"
 			sleep 10
@@ -1372,18 +1430,16 @@ case $PROT in
 		ln -fs $ROOTER/signal/modemsignal.sh $ROOTER_LINK/getsignal$CURRMODEM
 		ln -fs $ROOTER/connect/reconnect.sh $ROOTER_LINK/reconnect$CURRMODEM
 		# send custom AT startup command
-		if [ $(uci -q get modem.modeminfo$CURRMODEM.at) -eq "1" ]; then
-			ATCMDD=$(uci -q get modem.modeminfo$CURRMODEM.atc)
-			if [ ! -z "$ATCMDD" ]; then
-				OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$CPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
-				OX=$($ROOTER/common/processat.sh "$OX")
-				ERROR="ERROR"
-				if `echo $OX | grep "$ERROR" 1>/dev/null 2>&1`
-				then
-					log "Error sending custom AT command: $ATCMDD with result: $OX"
-				else
-					log "Sent custom AT command: $ATCMDD with result: $OX"
-				fi
+		ATCMDD=$(uci -q get modem.modeminfo$CURRMODEM.atc)
+		if [ ! -z "$ATCMDD" ]; then
+			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$CPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+			OX=$($ROOTER/common/processat.sh "$OX")
+			ERROR="ERROR"
+			if `echo $OX | grep "$ERROR" 1>/dev/null 2>&1`
+			then
+				log "Error sending custom AT command: $ATCMDD with result: $OX"
+			else
+				log "Sent custom AT command: $ATCMDD with result: $OX"
 			fi
 		fi
 		;;
